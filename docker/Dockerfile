@@ -93,4 +93,8 @@ COPY --from=builder --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /app/config/a
 
 RUN mkdir dets && mkdir temp && chown -R ${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /app
 
+COPY --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} docker/entrypoint.sh /app/entrypoint.sh
+
 USER ${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP}
+
+ENTRYPOINT ["/app/entrypoint.sh"]
