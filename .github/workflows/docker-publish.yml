@@ -25,9 +25,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: |
-            ghcr.io/luxfi/explorer
-            ghcr.io/luxfi/lux-explorer
+          images: ghcr.io/luxfi/lux-explorer
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
