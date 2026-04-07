@@ -106,6 +106,24 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns an optional parameter definition for the start of the time period.
+  Used for endpoints like token holders CSV that don't require a time range.
+  """
+  @spec optional_from_period_param() :: Parameter.t()
+  def optional_from_period_param do
+    %{from_period_param() | required: false}
+  end
+
+  @doc """
+  Returns an optional parameter definition for the end of the time period.
+  Used for endpoints like token holders CSV that don't require a time range.
+  """
+  @spec optional_to_period_param() :: Parameter.t()
+  def optional_to_period_param do
+    %{to_period_param() | required: false}
+  end
+
+  @doc """
   Returns a parameter definition for chain IDs in the query.
   """
   @spec chain_ids_param() :: Parameter.t()
@@ -853,6 +871,122 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns a parameter definition for a user operation sender address hash in the query.
+  """
+  @spec sender_address_hash_param() :: Parameter.t()
+  def sender_address_hash_param do
+    %Parameter{
+      name: :sender,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "User operation sender address hash"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a user operation bundler address hash in the query.
+  """
+  @spec bundler_address_hash_param() :: Parameter.t()
+  def bundler_address_hash_param do
+    %Parameter{
+      name: :bundler,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "User operation bundler address hash"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a user operation paymaster address hash in the query.
+  """
+  @spec paymaster_address_hash_param() :: Parameter.t()
+  def paymaster_address_hash_param do
+    %Parameter{
+      name: :paymaster,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "User operation paymaster address hash"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a user operation factory address hash in the query.
+  """
+  @spec factory_address_hash_param() :: Parameter.t()
+  def factory_address_hash_param do
+    %Parameter{
+      name: :factory,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "User operation factory address hash"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a user operation entry point address hash in the query.
+  """
+  @spec entry_point_address_hash_param() :: Parameter.t()
+  def entry_point_address_hash_param do
+    %Parameter{
+      name: :entry_point,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "User operation entry point address hash"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a user operation bundle index in the query.
+  """
+  @spec bundle_index_param() :: Parameter.t()
+  def bundle_index_param do
+    %Parameter{
+      name: :bundle_index,
+      in: :query,
+      schema: %Schema{type: :integer, minimum: 0},
+      required: false,
+      description: "User operation bundle index"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a user operation block number in the query.
+  """
+  @spec query_block_number_param() :: Parameter.t()
+  def query_block_number_param do
+    %Parameter{
+      name: :block_number,
+      in: :query,
+      schema: %Schema{type: :integer, minimum: 0},
+      required: false,
+      description: "User operation block number"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a UUID in the path.
+  """
+  @spec uuid_param() :: Parameter.t()
+  def uuid_param do
+    %Parameter{
+      name: :uuid_param,
+      in: :path,
+      schema: %Schema{
+        type: :string,
+        format: :uuid,
+        pattern: ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      },
+      required: true,
+      description: "UUID for CSV export"
+    }
+  end
+
+  @doc """
   Returns a list of base parameters (api_key and key).
   """
   @spec base_params() :: [Parameter.t()]
@@ -959,13 +1093,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: %Schema{anyOf: [%Schema{type: :integer}, EmptyString, NullString]},
       required: false,
       description: "Transaction index for paging"
-    },
-    "block_index" => %Parameter{
-      name: :block_index,
-      in: :query,
-      schema: %Schema{type: :integer},
-      required: false,
-      description: "Block index for paging"
     },
     "inserted_at" => %Parameter{
       name: :inserted_at,
@@ -1178,6 +1305,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: IntegerStringNullable,
       required: false,
       description: "Amount for paging"
+    },
+    "account_address_hash" => %Parameter{
+      name: :account_address_hash,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "Account address hash for paging"
     },
     "associated_account_address_hash" => %Parameter{
       name: :associated_account_address_hash,

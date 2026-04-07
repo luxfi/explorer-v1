@@ -28,6 +28,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
   alias Indexer.Fetcher.OnDemand.ContractCode, as: ContractCodeOnDemand
   alias Plug.Conn
 
+  import Ecto.Query, only: [from: 2]
   import Explorer.Chain, only: [hash_to_lower_case_string: 1]
   import Mox
 
@@ -974,7 +975,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
 
       transactions =
         (transactions_from ++ transactions_to)
-        |> Enum.sort(&(Decimal.compare(Wei.to(&1.value, :wei), Wei.to(&2.value, :wei)) in [:eq, :lt]))
+        |> sort_transactions_by_value(:asc)
 
       request = get(conn, "/api/v2/addresses/#{address.hash}/transactions", %{"sort" => "value", "order" => "asc"})
       assert response = json_response(request, 200)
@@ -1008,7 +1009,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
 
       transactions =
         (transactions_from ++ transactions_to)
-        |> Enum.sort(&(Decimal.compare(Wei.to(&1.value, :wei), Wei.to(&2.value, :wei)) in [:eq, :gt]))
+        |> sort_transactions_by_value(:desc)
 
       request = get(conn, "/api/v2/addresses/#{address.hash}/transactions", %{"sort" => "value", "order" => "desc"})
       assert response = json_response(request, 200)
@@ -2231,9 +2232,9 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           index: 1,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
           from_address: address
         )
+        |> InternalTransaction.preload_addresses()
 
       internal_transaction_to =
         insert(:internal_transaction,
@@ -2241,9 +2242,9 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           index: 2,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
           to_address: address
         )
+        |> InternalTransaction.preload_addresses()
 
       request = get(conn, "/api/v2/addresses/#{address.hash}/internal-transactions")
 
@@ -2284,7 +2285,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           index: 1,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
           from_address: address,
           to_address: insert(:address),
           gas: nil,
@@ -2313,10 +2313,10 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
             index: i,
             block_number: transaction.block_number,
             transaction_index: transaction.index,
-            block_hash: transaction.block_hash,
             from_address: address
           )
         end
+        |> InternalTransaction.preload_addresses()
 
       request = get(conn, "/api/v2/addresses/#{address.hash}/internal-transactions")
       assert response = json_response(request, 200)
@@ -2335,10 +2335,10 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
             index: i,
             block_number: transaction.block_number,
             transaction_index: transaction.index,
-            block_hash: transaction.block_hash,
             to_address: address
           )
         end
+        |> InternalTransaction.preload_addresses()
 
       filter = %{"filter" => "to"}
       request = get(conn, "/api/v2/addresses/#{address.hash}/internal-transactions", filter)
@@ -3981,7 +3981,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           index: x,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
           to_address: address
         )
       end
@@ -4024,7 +4023,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           index: x,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
           from_address: address
         )
       end
@@ -4077,7 +4075,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           index: x,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
           from_address: address
         )
       end
@@ -4124,7 +4121,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           index: x,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
           from_address: address
         )
       end
@@ -5682,7 +5678,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
     assert internal_transaction.block_number == json["block_number"]
     assert to_string(internal_transaction.gas) == json["gas_limit"]
     assert internal_transaction.index == json["index"]
-    assert to_string(internal_transaction.transaction_hash) == json["transaction_hash"]
+    assert to_string(internal_transaction.transaction.hash) == json["transaction_hash"]
     assert Address.checksum(internal_transaction.from_address_hash) == json["from"]["hash"]
     assert Address.checksum(internal_transaction.to_address_hash) == json["to"]["hash"]
   end
@@ -5702,8 +5698,29 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
     assert to_string(cb.value.value) == json["value"]
     assert cb.block_number == json["block_number"]
 
-    assert Jason.encode!(Repo.get_by(Block, number: cb.block_number).timestamp) =~
-             String.replace(json["block_timestamp"], "Z", "")
+    # The API uses linear interpolation over the fetched set (page_size + 1 items),
+    # so the returned timestamp may be off by up to 1 second from the actual block
+    # timestamp. Allow ±1 second tolerance to account for this artifact.
+    expected_timestamps =
+      Repo.all(
+        from(block in Block,
+          where: block.number == ^cb.block_number,
+          select: block.timestamp
+        )
+      )
+      |> Enum.flat_map(fn ts ->
+        truncated = DateTime.truncate(ts, :second)
+
+        [
+          DateTime.add(truncated, -1, :second),
+          truncated,
+          DateTime.add(truncated, 1, :second)
+        ]
+      end)
+      |> Enum.uniq()
+
+    {:ok, response_timestamp, 0} = DateTime.from_iso8601(json["block_timestamp"])
+    assert DateTime.truncate(response_timestamp, :second) in expected_timestamps
   end
 
   defp compare_item(%Token{} = token, json) do
@@ -5876,6 +5893,35 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
 
   defp value("ERC-721", _), do: 1
   defp value(_, nft), do: nft.current_token_balance.value
+
+  defp sort_transactions_by_value(transactions, order) do
+    Enum.sort(transactions, fn a, b ->
+      case Decimal.compare(Wei.to(a.value, :wei), Wei.to(b.value, :wei)) do
+        :lt -> order == :asc
+        :gt -> order == :desc
+        :eq -> compare_transactions_default_order(a, b)
+      end
+    end)
+  end
+
+  defp compare_transactions_default_order(a, b) do
+    case {
+      compare_values(a.block_number, b.block_number),
+      compare_values(a.index, b.index),
+      DateTime.compare(a.inserted_at, b.inserted_at),
+      compare_values(to_string(a.hash), to_string(b.hash))
+    } do
+      {:lt, _, _, _} -> false
+      {:eq, :lt, _, _} -> false
+      {:eq, :eq, :lt, _} -> false
+      {:eq, :eq, :eq, :gt} -> false
+      _ -> true
+    end
+  end
+
+  defp compare_values(a, b) when a < b, do: :lt
+  defp compare_values(a, b) when a > b, do: :gt
+  defp compare_values(_, _), do: :eq
 
   defp check_paginated_response(first_page_resp, second_page_resp, list) do
     assert Enum.count(first_page_resp["items"]) == 50

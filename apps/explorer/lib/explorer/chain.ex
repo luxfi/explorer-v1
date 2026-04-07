@@ -136,8 +136,11 @@ defmodule Explorer.Chain do
   @type paging_options :: {:paging_options, PagingOptions.t()}
   @typep balance_by_day :: %{date: String.t(), value: Wei.t()}
   @type api? :: {:api?, true | false}
+  @type include_internal_transaction_association? ::
+          {:include_internal_transaction_association?, true | false}
   @type ip :: {:ip, String.t()}
   @type show_scam_tokens? :: {:show_scam_tokens?, true | false}
+  @type timeout_option :: {:timeout, timeout() | nil}
 
   def wrapped_union_subquery(query) do
     from(
@@ -194,10 +197,12 @@ defmodule Explorer.Chain do
     |> select_repo(options).all()
   end
 
-  @spec address_to_logs(Hash.Address.t(), [paging_options | necessity_by_association_option | api?]) :: [Log.t()]
+  @spec address_to_logs(Hash.Address.t(), [paging_options | necessity_by_association_option | api? | timeout_option]) ::
+          [Log.t()]
   def address_to_logs(address_hash, csv_export?, options \\ []) when is_list(options) do
     paging_options = Keyword.get(options, :paging_options) || %PagingOptions{page_size: 50}
     necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    timeout = Keyword.get(options, :timeout)
 
     case paging_options do
       %PagingOptions{key: {0, 0}} ->
@@ -236,7 +241,7 @@ defmodule Explorer.Chain do
         |> filter_topic(Keyword.get(options, :topic))
         |> BlockReaderGeneral.where_block_number_in_period(from_block, to_block)
         |> join_associations(necessity_by_association)
-        |> select_repo(options).all()
+        |> select_repo(options).all(ExplorerHelper.maybe_timeout(timeout))
         |> Enum.take(paging_options.page_size)
     end
   end
@@ -331,8 +336,7 @@ defmodule Explorer.Chain do
     options
     |> Keyword.get(:paging_options, @default_paging_options)
     |> fetch_transactions_in_ascending_order_by_index()
-    |> join(:inner, [transaction], block in assoc(transaction, :block))
-    |> where([_, block], block.hash == ^block_hash)
+    |> where([transaction], transaction.block_hash == ^block_hash)
     |> Transaction.apply_filter_by_type_to_transactions(type_filter)
     |> join_associations(necessity_by_association)
     |> Transaction.put_has_token_transfers_to_transaction(old_ui?)
@@ -666,31 +670,48 @@ defmodule Explorer.Chain do
       then the `t:Explorer.Chain.Address.t/0` will not be included in the list.
 
   """
-  @spec hash_to_address(Hash.Address.t() | binary(), [necessity_by_association_option | api?]) ::
+  @spec hash_to_address(
+          Hash.Address.t() | binary(),
+          [necessity_by_association_option | api? | include_internal_transaction_association?]
+        ) ::
           {:ok, Address.t()} | {:error, :not_found}
   def hash_to_address(
         hash,
         options \\ [
-          necessity_by_association: %{
-            :names => :optional,
-            :smart_contract => :optional,
-            :token => :optional,
-            Address.contract_creation_transaction_associations() => :optional
-          }
+          necessity_by_association: default_hash_to_address_necessity_by_association()
         ]
       ) do
-    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    include_internal_transaction_association? =
+      Keyword.get(options, :include_internal_transaction_association?, true)
+
+    necessity_by_association =
+      options
+      |> Keyword.get(:necessity_by_association, default_hash_to_address_necessity_by_association())
 
     query = Address.address_query(hash)
 
     query
     |> join_associations(necessity_by_association)
     |> select_repo(options).one()
+    |> then(fn address ->
+      if include_internal_transaction_association?,
+        do: Address.preload_contract_creation_internal_transaction(address, select_repo(options)),
+        else: address
+    end)
     |> SmartContract.compose_address_for_unverified_smart_contract(hash, options)
     |> case do
       nil -> {:error, :not_found}
       address -> {:ok, address}
     end
+  end
+
+  defp default_hash_to_address_necessity_by_association do
+    %{
+      :names => :optional,
+      :smart_contract => :optional,
+      :token => :optional,
+      Address.contract_creation_transaction_association() => :optional
+    }
   end
 
   @doc """
@@ -731,7 +752,7 @@ defmodule Explorer.Chain do
             :names => :optional,
             :smart_contract => :optional,
             :token => :optional,
-            Address.contract_creation_transaction_associations() => :optional
+            Address.contract_creation_transaction_association() => :optional
           }
         ]
       ) do
@@ -2330,14 +2351,18 @@ defmodule Explorer.Chain do
     |> select_repo(options).all()
   end
 
-  @spec fetch_token_holders_from_token_hash_for_csv(Hash.Address.t(), [paging_options | api?]) :: [TokenBalance.t()]
+  @spec fetch_token_holders_from_token_hash_for_csv(Hash.Address.t(), [paging_options | api? | timeout_option]) :: [
+          TokenBalance.t()
+        ]
   def fetch_token_holders_from_token_hash_for_csv(contract_address_hash, options \\ []) do
+    timeout = Keyword.get(options, :timeout)
+
     query =
       contract_address_hash
       |> CurrentTokenBalance.token_holders_ordered_by_value_query_without_address_preload(options)
 
     query
-    |> select_repo(options).all()
+    |> select_repo(options).all(ExplorerHelper.maybe_timeout(timeout))
   end
 
   def fetch_token_holders_from_token_hash_and_token_id(contract_address_hash, token_id, options \\ []) do
