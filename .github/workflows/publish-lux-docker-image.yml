@@ -15,57 +15,30 @@ concurrency:
   group: lux-explorer-build-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  RELEASE_VERSION: '10.0.1'
-
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build_and_push:
-    name: Build and push image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.CR_PAT }}
-
-      - name: Extract short SHA
-        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-8)" >> $GITHUB_ENV
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/luxfi/explorer:latest
-            ghcr.io/luxfi/explorer:${{ github.sha }}
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            DECODE_NOT_A_CONTRACT_CALLS=false
-            MIXPANEL_URL=
-            MIXPANEL_TOKEN=
-            AMPLITUDE_URL=
-            AMPLITUDE_API_KEY=
-            BLOCKSCOUT_VERSION=v${{ env.RELEASE_VERSION }}+commit.${{ env.SHORT_SHA }}
-            RELEASE_VERSION=${{ env.RELEASE_VERSION }}
+  docker:
+    uses: hanzoai/.github/.github/workflows/docker-build.yml@main
+    with:
+      image: ghcr.io/luxfi/explorer
+      dockerfile: docker/Dockerfile
+      platforms: linux/amd64
+      build-args: |
+        DECODE_NOT_A_CONTRACT_CALLS=false
+        MIXPANEL_URL=
+        MIXPANEL_TOKEN=
+        AMPLITUDE_URL=
+        AMPLITUDE_API_KEY=
+        BLOCKSCOUT_VERSION=v10.0.1+commit.${{ github.sha }}
+        RELEASE_VERSION=10.0.1
+    secrets: inherit
 
   deploy:
     name: Deploy to production
-    needs: build_and_push
+    needs: docker
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
